@@ -158,8 +158,8 @@ class GPTQ:
         damp = percdamp * torch.mean(torch.diag(H))
         diag = torch.arange(self.columns, device=self.dev)
         H[diag, diag] += damp
-        H = torch.linalg.cholesky(H)
-        H = torch.cholesky_inverse(H)
+        H = torch.linalg.cholesky(H)         # cholesky分解获得下三角阵
+        H = torch.cholesky_inverse(H)        # 计算逆矩阵
         H = torch.linalg.cholesky(H, upper=True)
         Hinv = H
 
