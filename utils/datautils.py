@@ -95,7 +95,7 @@ def get_c4(nsamples, seed, seqlen, model):
         while True:
             i = random.randint(0, len(valdata) - 1)
             tmp = tokenizer(valdata[i]['text'], return_tensors='pt')
-            if tmp.input_ids.shape[1] >= seqlen:
+            if tmp.input_ids.shape[1] >= seqlen+1:
                 break
         i = random.randint(0, tmp.input_ids.shape[1] - seqlen - 1)
         j = i + seqlen
