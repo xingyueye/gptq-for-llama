@@ -8,6 +8,8 @@ import quant
 from gptq import GPTQ, Observer
 from utils import find_layers, DEV, set_seed, get_wikitext2, get_ptb, get_c4, get_ptb_new, get_c4_new, get_loaders, export_quant_table, gen_conditions
 from texttable import Texttable
+from data import LLaMaLambadaDataset
+from evaluator import LLaMaLambadaEvaluator
 
 
 def get_llama(model):
@@ -457,6 +459,7 @@ if __name__ == '__main__':
                         help='Auto upgrade layer precision to higher precision, for example int2 to int4, groupsize 128 to 64. \
             When this feature enabled, `--save` or `--save_safetensors` would be disable.')
     parser.add_argument('--quant-directory', type=str, default=None, help='Specify the directory for export quantization parameters to toml format. `None` means no export by default.')
+    parser.add_argument("--data_path", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -503,7 +506,8 @@ if __name__ == '__main__':
     if args.quant_directory is not None:
         export_quant_table(quantizers, args.quant_directory)
 
-    if not args.observe and args.save:
+    # if not args.observe and args.save:
+    if args.save:
         llama_pack(model, quantizers, args.wbits, args.groupsize)
         torch.save(model.state_dict(), args.save)
 
@@ -513,3 +517,17 @@ if __name__ == '__main__':
         state_dict = model.state_dict()
         state_dict = {k: v.clone().contiguous() for k, v in state_dict.items()}
         safe_save(state_dict, args.save_safetensors)
+
+    if args.data_path is not None:
+        from transformers import LlamaTokenizer, LlamaForCausalLM
+        tokenizer = LlamaTokenizer.from_pretrained(args.model)
+        tokenizer.pad_token = tokenizer.eos_token
+        dataset = LLaMaLambadaDataset(args.data_path, tokenizer)
+        evaluator = LLaMaLambadaEvaluator(dataset, tokenizer, 'cuda')
+
+        model_fp16 = LlamaForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
+        acc_fp16 = evaluator.evaluate(model_fp16.to(DEV))
+        print(f'Original model (fp16) accuracy: {acc_fp16}')
+
+        acc_quant = evaluator.evaluate(model.to(DEV))
+        print('Quantized model accuracy: {:0.4f}'.format(acc_quant))

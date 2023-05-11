@@ -9,6 +9,8 @@ from gptq import GPTQ, Observer
 from utils import find_layers, DEV, set_seed, get_wikitext2, get_ptb, get_c4, get_ptb_new, get_c4_new, get_loaders, export_quant_table, gen_conditions
 from texttable import Texttable
 import transformers
+from data import LambadaDataset
+from evaluator import LambadaEvaluator
 
 
 def get_bloom(model):
@@ -106,7 +108,7 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None):
 
         for name in subset:
             scale, zero, g_idx, error = gptq[name].fasterquant(percdamp=args.percdamp, groupsize=args.groupsize, actorder=args.act_order, name=name)
-            quantizers['model.layers.%d.%s' % (i, name)] = (gptq[name].quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), args.wbits, args.groupsize)
+            quantizers['transformer.h.%d.%s' % (i, name)] = (gptq[name].quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), args.wbits, args.groupsize)
 
             if args.observe:
                 observer.submit(name=name, layerid=i, gptq=gptq[name], error=error)
@@ -152,7 +154,7 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None):
                 scale, zero, g_idx, error = gptq.fasterquant(percdamp=args.percdamp, groupsize=groupsize, actorder=args.act_order, name=name)
 
                 table.add_row([wbits, groupsize, error])
-                quantizers['model.layers.%d.%s' % (layerid, name)] = (gptq.quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), wbits, groupsize)
+                quantizers['transformer.h.%d.%s' % (layerid, name)] = (gptq.quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), wbits, groupsize)
 
             print(table.draw())
             print('\n')
@@ -256,7 +258,7 @@ def bloom_eval(model, testenc, dev):
 
 
 # TODO: perform packing on GPU
-def llama_pack(model, quantizers, wbits, groupsize):
+def bloom_pack(model, quantizers, wbits, groupsize):
     layers = find_layers(model)
     layers = {n: layers[n] for n in quantizers}
     quant.make_quant_linear(model, quantizers, wbits, groupsize)
@@ -345,7 +347,7 @@ def llama_multigpu(model, gpus, gpu_dist):
             tmp = self.module(*inp, **kwargs)
             return tmp
 
-    layers = model.model.layers
+    layers = model.transformer.h
     from math import ceil
     if not gpu_dist:
         pergpu = ceil(len(layers) / len(gpus))
@@ -380,7 +382,7 @@ def benchmark(model, input_ids, check=False):
 
         return tmp
 
-    for i, layer in enumerate(model.model.layers):
+    for i, layer in enumerate(model.transformer.h):
         layer.register_forward_hook(clear_past(i))
 
     print('Benchmarking ...')
@@ -451,6 +453,7 @@ if __name__ == '__main__':
                         help='Auto upgrade layer precision to higher precision, for example int2 to int4, groupsize 128 to 64. \
             When this feature enabled, `--save` or `--save_safetensors` would be disable.')
     parser.add_argument('--quant-directory', type=str, default=None, help='Specify the directory for export quantization parameters to toml format. `None` means no export by default.')
+    parser.add_argument("--data_path", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -499,13 +502,29 @@ if __name__ == '__main__':
     if args.quant_directory is not None:
         export_quant_table(quantizers, args.quant_directory)
 
-    if not args.observe and args.save:
-        llama_pack(model, quantizers, args.wbits, args.groupsize)
+    if args.save:
+        bloom_pack(model, quantizers, args.wbits, args.groupsize)
         torch.save(model.state_dict(), args.save)
 
     if not args.observe and args.save_safetensors:
-        llama_pack(model, quantizers, args.wbits, args.groupsize)
+        bloom_pack(model, quantizers, args.wbits, args.groupsize)
         from safetensors.torch import save_file as safe_save
         state_dict = model.state_dict()
         state_dict = {k: v.clone().contiguous() for k, v in state_dict.items()}
         safe_save(state_dict, args.save_safetensors)
+
+    if args.data_path is not None:
+        from transformers import AutoTokenizer, BloomTokenizerFast, BloomForCausalLM
+        tokenizer = AutoTokenizer.from_pretrained(args.model, padding_side='left')
+        tokenizer.pad_token = tokenizer.eos_token
+        dataset = LambadaDataset(args.data_path, tokenizer)
+        evaluator = LambadaEvaluator(dataset, tokenizer, 'cuda')
+
+        model_fp16 = BloomForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
+        acc_fp16 = evaluator.evaluate(model_fp16.to(DEV))
+        print(f'Original model (fp16) accuracy: {acc_fp16}')
+
+        tick = time.time()
+        acc_quant = evaluator.evaluate(model.to(DEV))
+        print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
+        print(time.time() - tick)
