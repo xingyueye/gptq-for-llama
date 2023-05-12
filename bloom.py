@@ -273,8 +273,8 @@ def bloom_pack(model, quantizers, wbits, groupsize):
 
 
 def load_quant(model, checkpoint, wbits, groupsize=-1, fused_mlp=True, eval=True, warmup_autotune=True):
-    from transformers import LlamaConfig, LlamaForCausalLM, modeling_utils
-    config = LlamaConfig.from_pretrained(model)
+    from transformers import BloomConfig, BloomForCausalLM, modeling_utils
+    config = BloomConfig.from_pretrained(model)
 
     def noop(*args, **kwargs):
         pass
@@ -286,7 +286,7 @@ def load_quant(model, checkpoint, wbits, groupsize=-1, fused_mlp=True, eval=True
     torch.set_default_dtype(torch.half)
     modeling_utils._init_weights = False
     torch.set_default_dtype(torch.half)
-    model = LlamaForCausalLM(config)
+    model = BloomForCausalLM(config)
     torch.set_default_dtype(torch.float)
     if eval:
         model = model.eval()
@@ -515,10 +515,10 @@ if __name__ == '__main__':
 
     if args.data_path is not None:
         from transformers import AutoTokenizer, BloomTokenizerFast, BloomForCausalLM
-        tokenizer = AutoTokenizer.from_pretrained(args.model, padding_side='left')
-        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer = BloomTokenizerFast.from_pretrained(args.model, padding_side='left')
         dataset = LambadaDataset(args.data_path, tokenizer)
-        evaluator = LambadaEvaluator(dataset, tokenizer, 'cuda')
+        data_loader = torch.utils.data.DataLoader(dataset, batch_size = 1)
+        evaluator = LambadaEvaluator(data_loader, tokenizer, 'cuda')
 
         model_fp16 = BloomForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
         acc_fp16 = evaluator.evaluate(model_fp16.to(DEV))

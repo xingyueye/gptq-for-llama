@@ -529,5 +529,7 @@ if __name__ == '__main__':
         acc_fp16 = evaluator.evaluate(model_fp16.to(DEV))
         print(f'Original model (fp16) accuracy: {acc_fp16}')
 
+        tick = time.time()
         acc_quant = evaluator.evaluate(model.to(DEV))
         print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
+        print(time.time() - tick)
