@@ -521,7 +521,7 @@ if __name__ == '__main__':
         evaluator = LambadaEvaluator(data_loader, tokenizer, 'cuda')
 
         model_fp16 = BloomForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
-        acc_fp16 = evaluator.evaluate(model_fp16.to(DEV))
+        acc_fp16 = evaluator.evaluate(model_fp16)
         print(f'Original model (fp16) accuracy: {acc_fp16}')
 
         tick = time.time()

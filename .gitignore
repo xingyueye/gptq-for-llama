@@ -2,3 +2,5 @@ __pycache__/
 *.pt
 allenai
 .vscode/
+*.out
+test1.py

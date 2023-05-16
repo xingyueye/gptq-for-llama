@@ -508,8 +508,10 @@ if __name__ == '__main__':
 
     # if not args.observe and args.save:
     if args.save:
+        tick = time.time()
         llama_pack(model, quantizers, args.wbits, args.groupsize)
         torch.save(model.state_dict(), args.save)
+        print(time.time() - tick)
 
     if not args.observe and args.save_safetensors:
         llama_pack(model, quantizers, args.wbits, args.groupsize)
@@ -526,7 +528,7 @@ if __name__ == '__main__':
         evaluator = LLaMaLambadaEvaluator(dataset, tokenizer, 'cuda')
 
         model_fp16 = LlamaForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
-        acc_fp16 = evaluator.evaluate(model_fp16.to(DEV))
+        acc_fp16 = evaluator.evaluate(model_fp16)
         print(f'Original model (fp16) accuracy: {acc_fp16}')
 
         tick = time.time()
