@@ -4,3 +4,4 @@ allenai
 .vscode/
 *.out
 test1.py
+ckpt/

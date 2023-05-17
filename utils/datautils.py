@@ -68,7 +68,10 @@ def get_c4(nsamples, seed, seqlen, model):
 
     from transformers import AutoTokenizer
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+        if 'glm' in model:
+            tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
     except:
         tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
 
@@ -84,6 +87,12 @@ def get_c4(nsamples, seed, seqlen, model):
         i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
         j = i + seqlen
         inp = trainenc.input_ids[:, i:j]
+        if "glm" in model:
+            if hasattr(tokenizer, 'gmask_token_id'):
+                inp[:, -2] = tokenizer.gmask_token_id
+            else:
+                inp[:, -2] = 150001
+            inp[:, -1] = tokenizer.bos_token_id
         tar = inp.clone()
         tar[:, :-1] = -100
         trainloader.append((inp, tar))
