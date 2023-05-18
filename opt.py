@@ -8,6 +8,8 @@ import transformers
 from gptq import GPTQ
 from utils import find_layers, DEV, set_seed, get_wikitext2, get_ptb, get_c4, get_ptb_new, get_c4_new, get_loaders
 import quant
+from data import OPTLambadaDataset
+from evaluator import LLaMaLambadaEvaluator
 
 
 def get_opt(model):
@@ -20,6 +22,7 @@ def get_opt(model):
     torch.nn.init.uniform_ = skip
     torch.nn.init.normal_ = skip
     from transformers import OPTForCausalLM
+    OPTForCausalLM._keys_to_ignore_on_load_missing = [r"dense_alpha", r"fc2_alpha"]
     model = OPTForCausalLM.from_pretrained(model, torch_dtype='auto')
     model.seqlen = model.config.max_position_embeddings
     return model
@@ -81,6 +84,12 @@ def opt_sequential(model, dataloader, dev):
 
     quantizers = {}
     for i in range(len(layers)):
+
+        print(f'Quantizing layer {i+1}/{len(layers)}..')
+        print('+------------------+--------------+------------+-----------+-------+')
+        print('|       name       | weight_error | fp_inp_SNR | q_inp_SNR | time  |')
+        print('+==================+==============+============+===========+=======+')
+        
         layer = layers[i].to(dev)
 
         subset = find_layers(layer)
@@ -122,6 +131,8 @@ def opt_sequential(model, dataloader, dev):
         torch.cuda.empty_cache()
 
         inps, outs = outs, inps
+        print('+------------------+--------------+------------+-----------+-------+')
+        print('\n')
 
     model.config.use_cache = use_cache
 
@@ -396,6 +407,7 @@ if __name__ == '__main__':
     parser.add_argument('--sym', action='store_true', help='Whether to perform symmetric quantization.')
     parser.add_argument('--act-order', action='store_true', help='Whether to apply the activation order GPTQ heuristic')
     parser.add_argument('--new-eval', action='store_true', help='Whether to use the new PTB and C4 eval')
+    parser.add_argument("--data_path", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -444,3 +456,20 @@ if __name__ == '__main__':
         state_dict = model.state_dict()
         state_dict = {k: v.clone().contiguous() for k, v in state_dict.items()}
         safe_save(state_dict, args.save_safetensors)
+
+    if args.data_path is not None:
+        from transformers.models.opt.modeling_opt import OPTForCausalLM
+        from transformers import GPT2Tokenizer
+        tokenizer = GPT2Tokenizer.from_pretrained(args.model, padding_side='left')
+        dataset = OPTLambadaDataset(args.data_path, tokenizer)
+        evaluator = LLaMaLambadaEvaluator(dataset, tokenizer, 'cuda')
+
+        # OPTForCausalLM._keys_to_ignore_on_load_missing = [r"dense_alpha", r"fc2_alpha"]
+        # model_fp16 = OPTForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
+        # acc_fp16 = evaluator.evaluate(model_fp16)
+        # print(f'Original model (fp16) accuracy: {acc_fp16}')
+
+        tick = time.time()
+        acc_quant = evaluator.evaluate(model.to(DEV))
+        print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
+        print(time.time() - tick)

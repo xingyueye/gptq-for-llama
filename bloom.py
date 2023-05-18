@@ -454,6 +454,7 @@ if __name__ == '__main__':
             When this feature enabled, `--save` or `--save_safetensors` would be disable.')
     parser.add_argument('--quant-directory', type=str, default=None, help='Specify the directory for export quantization parameters to toml format. `None` means no export by default.')
     parser.add_argument("--data_path", type=str, default=None)
+    parser.add_argument("--save_unpack", type=str, default='')
 
     args = parser.parse_args()
 
@@ -502,6 +503,9 @@ if __name__ == '__main__':
     if args.quant_directory is not None:
         export_quant_table(quantizers, args.quant_directory)
 
+    if args.save_unpack:
+        torch.save(model.state_dict(), args.save_unpack)
+    
     if args.save:
         bloom_pack(model, quantizers, args.wbits, args.groupsize)
         torch.save(model.state_dict(), args.save)
