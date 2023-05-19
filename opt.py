@@ -1,5 +1,6 @@
+import os
 import time
-
+import math
 import torch
 import torch.nn as nn
 import argparse
@@ -408,6 +409,7 @@ if __name__ == '__main__':
     parser.add_argument('--act-order', action='store_true', help='Whether to apply the activation order GPTQ heuristic')
     parser.add_argument('--new-eval', action='store_true', help='Whether to use the new PTB and C4 eval')
     parser.add_argument("--data_path", type=str, default=None)
+    parser.add_argument("--save_hf_model", type=str, default='')
 
     args = parser.parse_args()
 
@@ -446,6 +448,15 @@ if __name__ == '__main__':
             print(dataset)
             opt_eval(model, testloader, DEV)
 
+    if args.save_hf_model:
+        if not os.path.exists(args.save_hf_model):
+            os.makedirs(args.save_hf_model)
+        quantizers_dict = quantizers.copy()
+        for key, value in quantizers_dict.items():
+            quantizers_dict[key] = quantizers_dict[key][1:]
+        torch.save(quantizers_dict, os.path.join(args.save_hf_model, 'quantizers.pt'))
+        model.save_pretrained(args.save_hf_model)
+    
     if args.save:
         opt_pack(model, quantizers, args.wbits, args.groupsize)
         torch.save(model.state_dict(), args.save)

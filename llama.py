@@ -1,3 +1,4 @@
+import os
 import argparse
 import time
 import numpy as np
@@ -460,6 +461,7 @@ if __name__ == '__main__':
             When this feature enabled, `--save` or `--save_safetensors` would be disable.')
     parser.add_argument('--quant-directory', type=str, default=None, help='Specify the directory for export quantization parameters to toml format. `None` means no export by default.')
     parser.add_argument("--data_path", type=str, default=None)
+    parser.add_argument("--save_hf_model", type=str, default='')
 
     args = parser.parse_args()
 
@@ -506,6 +508,15 @@ if __name__ == '__main__':
     if args.quant_directory is not None:
         export_quant_table(quantizers, args.quant_directory)
 
+    if args.save_hf_model:
+        if not os.path.exists(args.save_hf_model):
+            os.makedirs(args.save_hf_model)
+        quantizers_dict = quantizers.copy()
+        for key, value in quantizers_dict.items():
+            quantizers_dict[key] = quantizers_dict[key][1:]
+        torch.save(quantizers_dict, os.path.join(args.save_hf_model, 'quantizers.pt'))
+        model.save_pretrained(args.save_hf_model)
+    
     # if not args.observe and args.save:
     if args.save:
         tick = time.time()
