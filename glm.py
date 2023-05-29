@@ -1,5 +1,6 @@
 import os
 import argparse
+import json
 import time
 import numpy as np
 import torch
@@ -455,6 +456,7 @@ if __name__ == '__main__':
     parser.add_argument('--quant-directory', type=str, default=None, help='Specify the directory for export quantization parameters to toml format. `None` means no export by default.')
     parser.add_argument("--data_path", type=str, default=None)
     parser.add_argument("--save_hf_model", type=str, default='')
+    parser.add_argument("--load_hf_model", type=str, default='')
 
     args = parser.parse_args()
 
@@ -468,13 +470,21 @@ if __name__ == '__main__':
 
     if args.load:
         model = load_quant(args.model, args.load, args.wbits, args.groupsize)
+    elif args.load_hf_model:
+        if 'glm-130b' in args.model:
+            with open(os.path.join(args.load_hf_model, "device_map.json"), "r") as infile:
+                device_map = json.load(infile)
+        else:
+            device_map = 'auto'
+        model = AutoModel.from_pretrained(args.load_hf_model, torch_dtype=torch.float16, trust_remote_code=True, device_map=device_map)
+        model.seqlen = 2048
     else:
         model = get_glm(args.model)
         model.eval()
 
     dataloader, testloader = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, model=args.model, seqlen=model.seqlen)
 
-    if not args.load and args.wbits < 16 and not args.nearest:
+    if not args.load and not args.load_hf_model and args.wbits < 16 and not args.nearest:
         tick = time.time()
         quantizers = glm_sequential(model, dataloader, DEV)
         print(time.time() - tick)
@@ -528,11 +538,11 @@ if __name__ == '__main__':
         dataset = GLMLambadaDataset(args.data_path, tokenizer)
         evaluator = GLMLambadaEvaluator(dataset, tokenizer, 'cuda')
 
-        model_fp16 = AutoModel.from_pretrained(args.model, torch_dtype=torch.float16, trust_remote_code=True, device_map='auto')
+        model_fp16 = AutoModel.from_pretrained(args.model, torch_dtype=torch.float16, trust_remote_code=True, device_map=device_map)
         acc_fp16 = evaluator.evaluate(model_fp16)
         print(f'Original model (fp16) accuracy: {acc_fp16}')
 
         tick = time.time()
-        acc_quant = evaluator.evaluate(model.to(DEV))
+        acc_quant = evaluator.evaluate(model)
         print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
         print(time.time() - tick)

@@ -11,6 +11,7 @@ from utils import find_layers, DEV, set_seed, get_wikitext2, get_ptb, get_c4, ge
 from texttable import Texttable
 from data import LLaMaLambadaDataset
 from evaluator import LLaMaLambadaEvaluator
+from transformers import LlamaTokenizer, LlamaForCausalLM
 
 
 def get_llama(model):
@@ -462,6 +463,7 @@ if __name__ == '__main__':
     parser.add_argument('--quant-directory', type=str, default=None, help='Specify the directory for export quantization parameters to toml format. `None` means no export by default.')
     parser.add_argument("--data_path", type=str, default=None)
     parser.add_argument("--save_hf_model", type=str, default='')
+    parser.add_argument("--load_hf_model", type=str, default='')
 
     args = parser.parse_args()
 
@@ -475,13 +477,17 @@ if __name__ == '__main__':
 
     if args.load:
         model = load_quant(args.model, args.load, args.wbits, args.groupsize)
+        model = model.to(DEV)
+    elif args.load_hf_model:
+        model = LlamaForCausalLM.from_pretrained(args.load_hf_model, torch_dtype=torch.float16, device_map='auto')
+        model.seqlen = 2048
     else:
         model = get_llama(args.model)
         model.eval()
 
     dataloader, testloader = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, model=args.model, seqlen=model.seqlen)
 
-    if not args.load and args.wbits < 16 and not args.nearest:
+    if not args.load and not args.load_hf_model and args.wbits < 16 and not args.nearest:
         tick = time.time()
         quantizers = llama_sequential(model, dataloader, DEV)
         print(time.time() - tick)
@@ -538,11 +544,11 @@ if __name__ == '__main__':
         dataset = LLaMaLambadaDataset(args.data_path, tokenizer)
         evaluator = LLaMaLambadaEvaluator(dataset, tokenizer, 'cuda')
 
-        model_fp16 = LlamaForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
-        acc_fp16 = evaluator.evaluate(model_fp16)
-        print(f'Original model (fp16) accuracy: {acc_fp16}')
+        # model_fp16 = LlamaForCausalLM.from_pretrained(args.model, torch_dtype=torch.float16, device_map='auto')
+        # acc_fp16 = evaluator.evaluate(model_fp16)
+        # print(f'Original model (fp16) accuracy: {acc_fp16}')
 
         tick = time.time()
-        acc_quant = evaluator.evaluate(model.to(DEV))
+        acc_quant = evaluator.evaluate(model)
         print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
         print(time.time() - tick)
