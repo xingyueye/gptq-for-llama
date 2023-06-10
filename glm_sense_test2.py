@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import quant
 import copy
+import gc
 
 from gptq import GPTQ, Observer
 from utils import find_layers, DEV, set_seed, get_wikitext2, get_ptb, get_c4, get_ptb_new, get_c4_new, get_loaders, export_quant_table, gen_conditions
@@ -31,7 +32,7 @@ def get_glm(model, device_map):
 @torch.no_grad()
 def glm_sense_test(args, model, model_w2, dataloader, dev, path):
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    dataset = GLMLambadaDataset(args.data_path, tokenizer)
+    dataset = GLMLambadaDataset(args.data_path, tokenizer, split=1000)
     evaluator = GLMLambadaEvaluator(dataset, tokenizer, 'cuda')
 
     print('Starting Sensitivity Testing...')
@@ -48,6 +49,8 @@ def glm_sense_test(args, model, model_w2, dataloader, dev, path):
         print(time.time() - tick)
 
         model.transformer.layers[i] = layer_orin  # 测试结束恢复量化前的权重
+        del layer_orin
+        gc.collect() 
 
     return sense_scores
 

@@ -35,13 +35,14 @@ class GLMLambadaDataset(torch.utils.data.Dataset):
 
     def __init__(self,
                  path: str,
-                 tokenizer: transformers.PreTrainedTokenizerBase):
+                 tokenizer: transformers.PreTrainedTokenizerBase,
+                 split=-1):
         self.tokenizer = tokenizer
         self.encodings = dict()
         self.encodings['input_ids'] = []
         self.encodings['target_ids'] = []
         with open(path, 'r') as f:
-            inputs, targets = zip(*[json.loads(line)["text"] .strip('\n').rsplit(' ', 1) for line in f.readlines()])
+            inputs, targets = zip(*[json.loads(line)["text"] .strip('\n').rsplit(' ', 1) for line in f.readlines()][:split])
             for input, target in zip(inputs, targets):
                 input_token_ids = self.tokenizer(input, padding=True, return_token_type_ids=False, return_tensors='pt')
                 self.encodings['input_ids'].append(input_token_ids['input_ids'])
