@@ -39,8 +39,8 @@ def glm_sense_test(args, model, model_w2, dataloader, dev, path):
     sense_scores = []
 
     for i in range(len(model.transformer.layers)):
-        layer_orin = copy.deepcopy(model.transformer.layers[i])
-        model.transformer.layers[i] = model_w2.transformer.layers[i]
+        layer_orin = copy.deepcopy(model.transformer.layers[i].state_dict())
+        model.transformer.layers[i].load_state_dict(model_w2.transformer.layers[i].state_dict())
         # 测试
         tick = time.time()
         acc_quant = evaluator.evaluate(model)
@@ -48,9 +48,9 @@ def glm_sense_test(args, model, model_w2, dataloader, dev, path):
         sense_scores.append(acc_quant)
         print(time.time() - tick)
 
-        model.transformer.layers[i] = layer_orin  # 测试结束恢复量化前的权重
+        model.transformer.layers[i].load_state_dict(layer_orin)  # 测试结束恢复量化前的权重
         del layer_orin
-        gc.collect() 
+        torch.cuda.empty_cache()
 
     return sense_scores
 
@@ -104,6 +104,7 @@ if __name__ == '__main__':
 
     model_w2 = AutoModel.from_pretrained(args.load_hf_model, torch_dtype=torch.float16, trust_remote_code=True, device_map=device_map)
     model_w2.seqlen = 2048
+    model_w2.eval()
 
     dataloader, testloader = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, model=args.model, seqlen=model.seqlen)
     sense_scores = glm_sense_test(args, model, model_w2, dataloader, DEV, args.sense_test)
