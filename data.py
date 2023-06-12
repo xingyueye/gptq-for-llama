@@ -65,7 +65,7 @@ class LLaMaLambadaDataset(torch.utils.data.Dataset):
     def __init__(self,
                  path: str,
                  tokenizer: transformers.PreTrainedTokenizerBase,
-                 split=-1):
+                 split=5153):
         self.tokenizer = tokenizer
         self.encodings = dict()
         self.encodings['input_ids'] = []
