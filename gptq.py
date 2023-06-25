@@ -55,10 +55,14 @@ class Observer:
 
 class GPTQ:
 
-    def __init__(self, layer, observe=False):
-        self.layer = layer
-        self.dev = self.layer.weight.device
-        W = layer.weight.data.clone()
+    def __init__(self, layer, observe=False, dev=None):
+        self.layer = layer.module if hasattr(layer, 'module') else layer
+        # self.dev = self.layer.weight.device
+        if dev is not None:
+            self.dev = dev
+        else:
+            self.dev = self.layer.weight.device
+        W = self.layer.weight.data.clone()
         if isinstance(self.layer, nn.Conv2d):
             W = W.flatten(1)
         if isinstance(self.layer, transformers.Conv1D):
@@ -108,20 +112,19 @@ class GPTQ:
         # assign weight
         self.layer.weight.data = q_weight.reshape(self.layer.weight.shape).to(self.layer.weight.data.dtype)
 
-        if self.inp1 is not None:
-            # quantize input to int8
-            quantizer = quant.Quantizer()
-            quantizer.configure(8, perchannel=False, sym=True, mse=False)
-            quantizer.find_params(self.inp1)
-            q_in = quantizer.quantize(self.inp1).type(torch.float16)
-            q_out = self.layer(q_in)
+        q_SNR = '-'
+        fp_SNR = '-'
+        # if self.inp1 is not None:
+        #     # quantize input to int8
+        #     quantizer = quant.Quantizer()
+        #     quantizer.configure(8, perchannel=False, sym=True, mse=False)
+        #     quantizer.find_params(self.inp1)
+        #     q_in = quantizer.quantize(self.inp1).type(torch.float16)
+        #     q_out = self.layer(q_in)
 
-            # get kinds of SNR
-            q_SNR = torch_snr_error(q_out, self.out1).item()
-            fp_SNR = torch_snr_error(self.layer(self.inp1), self.out1).item()
-        else:
-            q_SNR = '-'
-            fp_SNR = '-'
+        #     # get kinds of SNR
+        #     q_SNR = torch_snr_error(q_out, self.out1).item()
+        #     fp_SNR = torch_snr_error(self.layer(self.inp1), self.out1).item()            
 
         table.add_row([name, weight_error, fp_SNR, q_SNR, timecost])
         print(table.draw().split('\n')[-2])
@@ -202,6 +205,7 @@ class GPTQ:
 
             Q[:, i1:i2] = Q1
             Losses[:, i1:i2] = Losses1 / 2
+            # print("Group {} Loss: {}".format(i1, Losses1.sum()))
 
             W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
 
@@ -220,6 +224,8 @@ class GPTQ:
             Q = Q.t()
 
         self.print_loss(name=name, q_weight=Q, weight_error=error, timecost=(time.time() - tick))
+
+        self.layer.weight.data = Q.reshape(self.layer.weight.shape).to(self.layer.weight.data.dtype)   
 
         if scale == []:
             scale.append(self.quantizer.scale)
