@@ -4,6 +4,7 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import quant
 
 from gptq import GPTQ, Observer
@@ -13,7 +14,8 @@ import transformers
 from data import LambadaDataset
 from evaluator import LambadaEvaluator
 from transformers import AutoTokenizer, BloomTokenizerFast, BloomForCausalLM
-
+from torch.nn import LayerNorm
+from llama_ln import MoveModule
 
 def get_bloom(model):
     import torch
@@ -29,7 +31,7 @@ def get_bloom(model):
 
 
 @torch.no_grad()
-def bloom_sequential(model, dataloader, dev, means=None, stds=None):
+def bloom_sequential(model, dataloader, dev, means=None, stds=None, update_norm=False, lr=1e-6):
     print('Starting ...')
 
     use_cache = model.config.use_cache
@@ -65,30 +67,6 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None):
             pass
     layers[0] = layers[0].module
 
-    record_handles = []
-    float_outs = {}
-    def record_dist(idx):
-        def tmp(_, inp, out):
-            _out = out[0]
-            mean = torch.mean(_out.view(-1, _out.shape[-1]), dim=0).cpu().numpy()
-            std = torch.sqrt(torch.var(_out.view(-1, _out.shape[-1]), dim=0) + 1e-6).cpu().numpy()
-            float_outs[idx].append([mean, std])
-        return tmp
-    for i in range(len(layers)):
-        float_outs[i] = []
-        record_handles.append(layers[i].register_forward_hook(record_dist(i)))
-
-    model = model.to(dev)
-    for batch in dataloader:
-        model(batch[0].to(dev))
-
-    for i in range(len(float_outs)):
-        np.save("bloom_output/layer_{}".format(i), np.array(float_outs[i]))
-    del float_outs
-
-    for h in record_handles:
-        h.remove()
-
     layers[0] = layers[0].cpu()
     model.transformer.word_embeddings = model.transformer.word_embeddings.cpu()
     model.transformer.word_embeddings_layernorm = model.transformer.word_embeddings_layernorm.cpu()
@@ -102,6 +80,8 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None):
 
     quantizers = {}
     observer = Observer()
+
+    gpus = [torch.device('cuda:%d' % i) for i in range(torch.cuda.device_count())]
     for i in range(len(layers)):
 
         print(f'Quantizing layer {i+1}/{len(layers)}..')
@@ -112,6 +92,20 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None):
         layer = layers[i].to(dev)
         subset = find_layers(layer)
         gptq = {}
+
+        if update_norm:
+            norm_layers = find_layers(layer, layers=[LayerNorm])
+            # gpu_id = 0
+            if len(gpus) > 1:
+                layer.self_attention.query_key_value = MoveModule(layer.self_attention.query_key_value.to(gpus[0]), dev=gpus[0])
+                layer.self_attention.dense = MoveModule(layer.self_attention.dense.to(gpus[1]), dev=gpus[1])
+                layer.mlp.dense_h_to_4h = MoveModule(layer.mlp.dense_h_to_4h.to(gpus[2]), dev=gpus[2])
+                layer.mlp.dense_4h_to_h = MoveModule(layer.mlp.dense_4h_to_h.to(gpus[3]), dev=gpus[3])
+                # layer.mlp.gate_proj = MoveModule(layer.mlp.gate_proj.to(gpus[4]), dev=gpus[4])
+                # layer.mlp.down_proj = MoveModule(layer.mlp.down_proj.to(gpus[5]), dev=gpus[5])
+                # layer.mlp.up_proj = MoveModule(layer.mlp.up_proj.to(gpus[6]), dev=gpus[6])
+                layer.input_layernorm = MoveModule(layer.input_layernorm.to(gpus[3]), dev=gpus[3])
+                layer.post_attention_layernorm = MoveModule(layer.post_attention_layernorm.to(gpus[3]), dev=gpus[3])
 
         for name in subset:
             gptq[name] = GPTQ(subset[name], observe=args.observe)
@@ -141,6 +135,81 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None):
             else:
                 gptq[name].free()
 
+        # # ========= Optimize LN layers  =========
+        if update_norm:
+            norm_params = []
+            for name in norm_layers:
+                norm_layers[name].is_training = True
+                for param in norm_layers[name].parameters():
+                    # param.requires_grad = True
+                    param.requires_grad_()
+                    norm_params.append(param)
+            
+            iters = 1
+
+            # opt = torch.optim.AdamW(norm_params, lr=1e-3, betas=(0.9, 0.999))
+            opt = torch.optim.Adam(norm_params, lr=lr)
+            # opt = torch.optim.SGD(norm_params, lr=1e-3)
+            sche = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=iters, eta_min=lr)
+            # loss_func = torch.nn.KLDivLoss(reduction='batchmean', log_target=True)
+            loss_func = torch.nn.MSELoss(reduction='sum')
+            batch_size = 1
+            T = 1.0
+
+            batch_inps = torch.cat([inps[t].unsqueeze(0).float() for t in range(args.nsamples)])
+            batch_outs = torch.cat([outs[t].unsqueeze(0).float() for t in range(args.nsamples)])
+            layer.train().float()
+            with torch.set_grad_enabled(True):
+                for it in range(iters):
+                    for j in range(args.nsamples // batch_size):
+                        opt.zero_grad()
+                        total_loss = 0
+                        cur_out = layer(batch_inps[j*batch_size : (j+1)*batch_size],
+                                        attention_mask=torch.stack([attention_mask[0]]*batch_size,dim=0),
+                                        alibi=torch.stack([alibi[0]]*batch_size,dim=0).float())[0]
+
+                        # MSE Loss
+                        # total_loss += loss_func(cur_out, batch_outs[j*batch_size : (j+1)*batch_size])
+
+                        # mean-std Loss
+                        tea_mean = torch.mean(batch_outs[j*batch_size : (j+1)*batch_size].view(-1, cur_out.shape[-1]), dim=0)
+                        tea_std = torch.sqrt(torch.var(batch_outs[j*batch_size : (j+1)*batch_size].view(-1, cur_out.shape[-1]), dim=0) + 1e-6)
+
+                        tmp_mean = torch.mean(cur_out.view(-1, cur_out.shape[-1]), dim=0)
+                        tmp_std = torch.sqrt(torch.var(cur_out.view(-1, cur_out.shape[-1]), dim=0) + 1e-6)
+                        total_loss += loss_func(tmp_mean, tea_mean)
+                        total_loss += loss_func(tmp_std, tea_std)
+
+                        # KL-div Loss
+                        # total_loss += loss_func(F.log_softmax(cur_out / T, dim=-1), 
+                        #                         F.log_softmax(norm_outs[name][j].detach() / T, dim=-1)) * (T * T)
+                        total_loss.backward(retain_graph=True)
+                        # nn.utils.clip_grad_value_(norm_params, clip_value=1.0)
+                        opt.step()
+                    sche.step()
+                    if it % 1 == 0:
+                        print("|| Iter: {}, lr: {}, Norm Loss: {}".format(it, opt.param_groups[0]['lr'], total_loss))
+            layer.eval().half()
+            # layer.eval()
+            # for h in norm_handles:
+            #     h.remove()
+            for name in norm_layers:
+                norm_layers[name].is_training = True
+                for param in norm_layers[name].parameters():
+                    param.requires_grad = False
+
+            if len(gpus) > 1:
+                layer.self_attention.query_key_value = layer.self_attention.query_key_value.module
+                layer.self_attention.dense = layer.self_attention.dense.module
+                layer.mlp.dense_h_to_4h = layer.mlp.dense_h_to_4h.module
+                layer.mlp.dense_4h_to_h = layer.mlp.dense_4h_to_h.module
+                layer.input_layernorm = layer.input_layernorm.module
+                layer.post_attention_layernorm = layer.post_attention_layernorm.module
+            
+            del batch_inps
+            del batch_outs
+        # ========= End =========================================
+        layer = layer.to(dev)
         for j in range(args.nsamples):
             outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, alibi=alibi)[0]
 
@@ -171,7 +240,7 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None):
     #     model(batch[0].to(dev))
 
     # for i in range(len(quant_outs)):
-    #     np.save("bloom_output_q/layer_{}".format(i), np.array(quant_outs[i]))
+    #     np.save("bloom_output_q_ln/layer_{}".format(i), np.array(quant_outs[i]))
     # del quant_outs
     # for h in record_handles:
     #     h.remove()
@@ -266,7 +335,7 @@ def bloom_eval(model, testenc, dev):
     alibi = cache['alibi']
 
     for i in range(len(layers)):
-        print(i)
+        # print(i)
         layer = layers[i].to(dev)
 
         if args.nearest:
@@ -478,7 +547,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('model', type=str, help='BLOOM model to load; pass `bigscience/bloom-X`.')
-    parser.add_argument('dataset', type=str, choices=['wikitext2', 'ptb', 'c4'], help='Where to extract calibration data from.')
+    parser.add_argument('dataset', type=str, choices=['wikitext2', 'ptb', 'c4', 'rand_gen'], help='Where to extract calibration data from.')
     parser.add_argument('--seed', type=int, default=0, help='Seed for sampling the calibration data.')
     parser.add_argument('--nsamples', type=int, default=128, help='Number of calibration data samples.')
     parser.add_argument('--percdamp', type=float, default=.01, help='Percent of the average Hessian diagonal to use for dampening.')
@@ -506,6 +575,9 @@ if __name__ == '__main__':
     parser.add_argument("--save_unpack", type=str, default='')
     parser.add_argument("--save_hf_model", type=str, default='')
     parser.add_argument("--load_hf_model", type=str, default='')
+    parser.add_argument('--update_norm', action='store_true', help='Whether to use the new PTB and C4 eval')
+    parser.add_argument('--lr', type=float, default=1.e-6, help='Learning Rate for Norm Tuning.')
+    parser.add_argument('--gen_data', type=str, help='BLOOM model to load; pass `bigscience/bloom-X`.')
 
     args = parser.parse_args()
 
@@ -527,11 +599,14 @@ if __name__ == '__main__':
         model = get_bloom(args.model)
         model.eval()
 
-    dataloader, testloader = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, model=args.model, seqlen=model.seqlen)
+    dataloader, testloader = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, 
+            model=args.model, seqlen=model.seqlen, 
+            # real_model=model.to(DEV), gen_data=args.gen_data
+            )
 
     if not args.load and not args.load_hf_model and args.wbits < 16 and not args.nearest:
         tick = time.time()
-        quantizers = bloom_sequential(model, dataloader, DEV)
+        quantizers = bloom_sequential(model, dataloader, DEV, update_norm=args.update_norm, lr=args.lr)
         print(time.time() - tick)
 
     if args.benchmark:
@@ -593,6 +668,10 @@ if __name__ == '__main__':
         # print(f'Original model (fp16) accuracy: {acc_fp16}')
 
         tick = time.time()
-        acc_quant = evaluator.evaluate(model)
+        gpus = [torch.device('cuda:%d' % i) for i in range(torch.cuda.device_count())]
+        if len(gpus) > 1:
+            acc_quant = evaluator.evaluate(model)
+        else:
+            acc_quant = evaluator.evaluate(model.to(DEV))
         print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
         print(time.time() - tick)

@@ -3,23 +3,27 @@ import argparse
 import torch
 import torch.nn as nn
 import quant
-
+import numpy as np
 from gptq import GPTQ
 from utils import find_layers, DEV, set_seed, get_wikitext2, get_ptb, get_c4, get_ptb_new, get_c4_new, get_loaders
 import transformers
-from transformers import AutoTokenizer
+# from transformers import AutoTokenizer
+import random
+import string
+random.seed(42)
+
+from transformers import AutoTokenizer, BloomTokenizerFast, BloomForCausalLM
 
 
-def get_llama(model):
-
+def get_bloom(model):
+    import torch
     def skip(*args, **kwargs):
         pass
-
     torch.nn.init.kaiming_uniform_ = skip
     torch.nn.init.uniform_ = skip
     torch.nn.init.normal_ = skip
-    from transformers import LlamaForCausalLM
-    model = LlamaForCausalLM.from_pretrained(model, torch_dtype=torch.float16, device_map='auto')
+    from transformers import BloomForCausalLM
+    model = BloomForCausalLM.from_pretrained(model, torch_dtype=torch.float16, device_map='auto')
     model.seqlen = 2048
     return model
 
@@ -82,6 +86,7 @@ if __name__ == '__main__':
     parser.add_argument('--load', type=str, default='', help='Load quantized model.')
 
     parser.add_argument('--text', type=str, help='input text')
+    parser.add_argument('--save_npy', type=str, default='', help='input text')
 
     parser.add_argument('--min_length', type=int, default=10, help='The minimum length of the sequence to be generated.')
 
@@ -104,19 +109,61 @@ if __name__ == '__main__':
     if args.load:
         model = load_quant(args.model, args.load, args.wbits, args.groupsize)
     else:
-        model = get_llama(args.model)
+        model = get_bloom(args.model)
         model.eval()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
+    # model.to(DEV)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
+    # input_ids = tokenizer.encode(args.text, return_tensors="pt").to(DEV)
     input_ids = tokenizer.encode(args.text, return_tensors="pt").cuda()
-
+    input_lens = input_ids.shape[-1]
     with torch.no_grad():
-        generated_ids = model.generate(
-            input_ids,
-            do_sample=True,
-            min_length=args.min_length,
-            max_length=args.max_length,
-            top_p=args.top_p,
-            temperature=args.temperature,
-        )
+            generated_ids = model.generate(
+                input_ids,
+                do_sample=True,
+                min_length=args.min_length,
+                max_length=args.max_length,
+                top_p=args.top_p,
+                temperature=args.temperature,
+            )
     print(tokenizer.decode([el.item() for el in generated_ids[0]]))
+
+    # vocab = tokenizer.get_vocab()
+    # key_list = list(vocab.keys())
+    # value_list = list(vocab.values())
+
+    # def isEnglish(s):
+    #     for c in s:
+    #         if not c.isalpha() or c not in string.ascii_letters:
+    #             return False
+    #     return True
+    # gen_inp = []
+    # cnt = 0
+    # while cnt < 128:
+    #     while True:
+    #         idx = random.randint(0, tokenizer.vocab_size)
+    #         s = key_list[idx]
+    #         if isEnglish(s):
+    #             idx = vocab[s]
+    #             break
+    #     print("[GENERATE DATA]: {}".format(s))
+    #         # input_ids = tokenizer.encode(rand_inp, return_tensors="pt").to(next(real_model.parameters()).device)
+    #         # _input_ids = torch.tensor(rand_inp).reshape(1, -1).cuda()
+    #     input_ids = tokenizer.encode(args.text + s, return_tensors="pt").cuda()
+    #     with torch.no_grad():
+    #         generated_ids = model.generate(
+    #             input_ids,
+    #             do_sample=True,
+    #             min_length=args.max_length,
+    #             max_length=args.max_length + input_lens,
+    #             top_p=args.top_p,
+    #             temperature=args.temperature,
+    #         )
+    #     print(tokenizer.decode([el.item() for el in generated_ids[0]]))
+    #     if generated_ids[:, input_lens:].shape[-1] == args.max_length:
+    #         gen_inp.append(generated_ids[:, input_lens:].cpu().numpy())
+    #         cnt += 1
+    #     else:
+    #         print("Out law format of generated results, lenght of {}".format(generated_ids[:, input_lens:].shape[-1]))
+    # gen_inp = np.stack(gen_inp, axis=0)
+    # np.save(args.save_npy, gen_inp)

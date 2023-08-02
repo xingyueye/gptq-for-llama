@@ -3,12 +3,14 @@ import argparse
 import torch
 import torch.nn as nn
 import quant
-
+import numpy as np
 from gptq import GPTQ
 from utils import find_layers, DEV, set_seed, get_wikitext2, get_ptb, get_c4, get_ptb_new, get_c4_new, get_loaders
 import transformers
 from transformers import AutoTokenizer
-
+import random
+import string
+random.seed(42)
 
 def get_llama(model):
 
@@ -107,16 +109,47 @@ if __name__ == '__main__':
         model = get_llama(args.model)
         model.eval()
 
+    # model.to(DEV)
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
-    input_ids = tokenizer.encode(args.text, return_tensors="pt").cuda()
+    # input_ids = tokenizer.encode(args.text, return_tensors="pt").to(DEV)
+    # input_ids = tokenizer.encode(args.text, return_tensors="pt").cuda()
+    vocab = tokenizer.get_vocab()
+    key_list = list(vocab.keys())
+    value_list = list(vocab.values())
 
-    with torch.no_grad():
-        generated_ids = model.generate(
-            input_ids,
-            do_sample=True,
-            min_length=args.min_length,
-            max_length=args.max_length,
-            top_p=args.top_p,
-            temperature=args.temperature,
-        )
-    print(tokenizer.decode([el.item() for el in generated_ids[0]]))
+    def isEnglish(s):
+        for c in s:
+            if not c.isalpha() or c not in string.ascii_letters:
+                return False
+        return True
+    gen_inp = []
+    cnt = 0
+    while cnt < 128:
+        while True:
+            idx = random.randint(0, tokenizer.vocab_size)
+            s = key_list[idx]
+            if isEnglish(s):
+                idx = vocab[s]
+                break
+        print("[GENERATE DATA]: {}".format(s))
+            # input_ids = tokenizer.encode(rand_inp, return_tensors="pt").to(next(real_model.parameters()).device)
+            # _input_ids = torch.tensor(rand_inp).reshape(1, -1).cuda()
+        input_ids = tokenizer.encode(args.text + s, return_tensors="pt").cuda()
+        input_lens = input_ids.shape[-1]
+        with torch.no_grad():
+            generated_ids = model.generate(
+                input_ids,
+                do_sample=True,
+                min_length=args.max_length,
+                max_length=args.max_length + input_lens,
+                top_p=args.top_p,
+                temperature=args.temperature,
+            )
+        # print(tokenizer.decode([el.item() for el in generated_ids[0]]))
+        if generated_ids[:, input_lens:].shape[-1] == args.max_length:
+            gen_inp.append(generated_ids[:, input_lens:].cpu().numpy())
+            cnt += 1
+        else:
+            print("Out law format of generated results, lenght of {}".format(generated_ids[:, input_lens:].shape[-1]))
+    gen_inp = np.stack(gen_inp, axis=0)
+    np.save('./llama-65b-gen-calib-128x2048.npy', gen_inp)

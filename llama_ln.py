@@ -140,16 +140,16 @@ def llama_sequential(model, dataloader, dev):
             out = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
             ori_outs.append(out)
 
-        gpu_id = 0
-        layer.self_attn.q_proj = MoveModule(layer.self_attn.q_proj.to(gpus[0]), dev=gpus[0])
-        layer.self_attn.k_proj = MoveModule(layer.self_attn.k_proj.to(gpus[1]), dev=gpus[1])
-        layer.self_attn.v_proj = MoveModule(layer.self_attn.v_proj.to(gpus[2]), dev=gpus[2])
-        layer.self_attn.o_proj = MoveModule(layer.self_attn.o_proj.to(gpus[3]), dev=gpus[3])
-        layer.mlp.gate_proj = MoveModule(layer.mlp.gate_proj.to(gpus[4]), dev=gpus[4])
-        layer.mlp.down_proj = MoveModule(layer.mlp.down_proj.to(gpus[5]), dev=gpus[5])
-        layer.mlp.up_proj = MoveModule(layer.mlp.up_proj.to(gpus[6]), dev=gpus[6])
-        layer.input_layernorm = MoveModule(layer.input_layernorm.to(gpus[7]), dev=gpus[7])
-        layer.post_attention_layernorm = MoveModule(layer.post_attention_layernorm.to(gpus[7]), dev=gpus[7])
+        if len(gpus) > 1:
+            layer.self_attn.q_proj = MoveModule(layer.self_attn.q_proj.to(gpus[0]), dev=gpus[0])
+            layer.self_attn.k_proj = MoveModule(layer.self_attn.k_proj.to(gpus[1]), dev=gpus[1])
+            layer.self_attn.v_proj = MoveModule(layer.self_attn.v_proj.to(gpus[2]), dev=gpus[2])
+            layer.self_attn.o_proj = MoveModule(layer.self_attn.o_proj.to(gpus[3]), dev=gpus[3])
+            layer.mlp.gate_proj = MoveModule(layer.mlp.gate_proj.to(gpus[4]), dev=gpus[4])
+            layer.mlp.down_proj = MoveModule(layer.mlp.down_proj.to(gpus[5]), dev=gpus[5])
+            layer.mlp.up_proj = MoveModule(layer.mlp.up_proj.to(gpus[6]), dev=gpus[6])
+            layer.input_layernorm = MoveModule(layer.input_layernorm.to(gpus[7]), dev=gpus[7])
+            layer.post_attention_layernorm = MoveModule(layer.post_attention_layernorm.to(gpus[7]), dev=gpus[7])
         # for name in full:
         #     full[name] = MoveModule(full[name].to(gpus[gpu_id]), dev=gpus[gpu_id])
         #     gpu_id += 1
@@ -323,15 +323,16 @@ def llama_sequential(model, dataloader, dev):
         for j in range(args.nsamples):
             outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
 
-        layer.self_attn.q_proj = layer.self_attn.q_proj.module
-        layer.self_attn.k_proj = layer.self_attn.k_proj.module
-        layer.self_attn.v_proj = layer.self_attn.v_proj.module
-        layer.self_attn.o_proj = layer.self_attn.o_proj.module
-        layer.mlp.gate_proj = layer.mlp.gate_proj.module
-        layer.mlp.down_proj = layer.mlp.down_proj.module
-        layer.mlp.up_proj = layer.mlp.up_proj.module
-        layer.input_layernorm = layer.input_layernorm.module
-        layer.post_attention_layernorm = layer.post_attention_layernorm.module
+        if len(gpus) > 1:
+            layer.self_attn.q_proj = layer.self_attn.q_proj.module
+            layer.self_attn.k_proj = layer.self_attn.k_proj.module
+            layer.self_attn.v_proj = layer.self_attn.v_proj.module
+            layer.self_attn.o_proj = layer.self_attn.o_proj.module
+            layer.mlp.gate_proj = layer.mlp.gate_proj.module
+            layer.mlp.down_proj = layer.mlp.down_proj.module
+            layer.mlp.up_proj = layer.mlp.up_proj.module
+            layer.input_layernorm = layer.input_layernorm.module
+            layer.post_attention_layernorm = layer.post_attention_layernorm.module
 
         layers[i] = layer.cpu()
         del layer
@@ -758,6 +759,10 @@ if __name__ == '__main__':
         # print(f'Original model (fp16) accuracy: {acc_fp16}')
 
         tick = time.time()
-        acc_quant = evaluator.evaluate(model)
+        gpus = [torch.device('cuda:%d' % i) for i in range(torch.cuda.device_count())]
+        if len(gpus) > 1:
+            acc_quant = evaluator.evaluate(model)
+        else:
+            acc_quant = evaluator.evaluate(model.to(DEV))
         print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
         print(time.time() - tick)
