@@ -127,6 +127,20 @@ def get_c4(nsamples, seed, seqlen, model):
 
     return trainloader, valenc
 
+def get_qat_gen_tokens(nsamples, seed, seqlen, model, real_model, data_path):
+    trainloader = []
+    if os.path.isfile(data_path):
+        data = np.load(data_path)
+        for i in range(nsamples):
+            inp = torch.tensor(data[i])
+            tar = inp.clone()
+            tar[:, :-1] = -100
+            trainloader.append((inp, tar))
+    else:
+        raise FileNotFoundError("Generated Data Not Found: {}".format(data_path))
+
+    valenc = None
+    return trainloader, valenc
 
 def get_prompt_tokens(nsamples, seed, seqlen, model, real_model):
 
@@ -443,3 +457,5 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, model='', real_model=No
         return get_random_generalize_tokens(nsamples, seed, seqlen, model, real_model, gen_data=gen_data)
     if 'prompt' in name:
         return get_prompt_tokens(nsamples, seed, seqlen, model, real_model)
+    if 'qat_gen' in name:
+        return get_qat_gen_tokens(nsamples, seed, seqlen, model, real_model, gen_data)

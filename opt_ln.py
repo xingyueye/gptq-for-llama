@@ -525,6 +525,7 @@ if __name__ == '__main__':
     if not args.load and not args.load_hf_model and args.wbits < 16 and not args.nearest:
         tick = time.time()
         quantizers = opt_sequential(model, dataloader, DEV, update_norm=args.update_norm)
+        print("|| GPTQ Time ===================================================")
         print(time.time() - tick)
 
     if args.benchmark:
@@ -579,6 +580,6 @@ if __name__ == '__main__':
         # print(f'Original model (fp16) accuracy: {acc_fp16}')
 
         tick = time.time()
-        acc_quant = evaluator.evaluate(model)
+        acc_quant = evaluator.evaluate(model.to(DEV))
         print('Quantized model accuracy: {:0.4f}'.format(acc_quant))
         print(time.time() - tick)
