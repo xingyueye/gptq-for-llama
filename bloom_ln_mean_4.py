@@ -82,7 +82,7 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None, update_norm=
     observer = Observer()
 
     gpus = [torch.device('cuda:%d' % i) for i in range(torch.cuda.device_count())]
-    lr_schedule = lambda x : lr * (1 + x * (100. / 30.))
+    lr_schedule = lambda x : lr * (1 + x * (10. / len(layers)))
     for i in range(len(layers)):
 
         print(f'Quantizing layer {i+1}/{len(layers)}..')
@@ -592,7 +592,7 @@ if __name__ == '__main__':
 
     if args.load:
         model = load_quant(args.model, args.load, args.wbits, args.groupsize)
-        model = model.to(DEV)
+        # model = model.to(DEV)
     elif args.load_hf_model:
         model = BloomForCausalLM.from_pretrained(args.load_hf_model, torch_dtype=torch.float16, device_map='auto')
         model.seqlen = 2048
@@ -602,7 +602,7 @@ if __name__ == '__main__':
 
     dataloader, testloader = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, 
             model=args.model, seqlen=model.seqlen, 
-            real_model=model.to(DEV), gen_data=args.gen_data
+            real_model=None, gen_data=args.gen_data
             )
 
     if not args.load and not args.load_hf_model and args.wbits < 16 and not args.nearest:

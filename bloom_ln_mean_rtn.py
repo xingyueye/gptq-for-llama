@@ -31,7 +31,7 @@ def get_bloom(model):
 
 
 @torch.no_grad()
-def bloom_sequential(model, dataloader, dev, means=None, stds=None, update_norm=False, lr=1e-6):
+def bloom_sequential(model, dataloader, dev, means=None, stds=None, update_norm=False, lr=1e-6, bit=4):
     print('Starting ...')
 
     use_cache = model.config.use_cache
@@ -128,10 +128,10 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None, update_norm=
             h.remove()
 
         for name in subset:
-            # scale, zero, g_idx, error = gptq[name].fasterquant(percdamp=args.percdamp, groupsize=args.groupsize, actorder=args.act_order, name=name)
-            # quantizers['transformer.h.%d.%s' % (i, name)] = (gptq[name].quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), args.wbits, args.groupsize)
-            gptq[name].quantizer.find_params(gptq[name].layer.weight, weight=True)
-            gptq[name].layer.weight = gptq[name].quantizer.quantize(gptq[name].layer.weight.unsqueeze(1)).flatten()
+            scale, zero, g_idx, error = gptq[name].fasterquant(percdamp=args.percdamp, groupsize=args.groupsize, actorder=args.act_order, name=name)
+            quantizers['transformer.h.%d.%s' % (i, name)] = (gptq[name].quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), args.wbits, args.groupsize)
+            # gptq[name].quantizer.find_params(gptq[name].layer.weight, weight=True)
+            # gptq[name].layer.weight = gptq[name].quantizer.quantize(gptq[name].layer.weight.unsqueeze(1)).flatten()
 
             if args.observe:
                 observer.submit(name=name, layerid=i, gptq=gptq[name], error=error)
@@ -244,7 +244,7 @@ def bloom_sequential(model, dataloader, dev, means=None, stds=None, update_norm=
         model(batch[0].to(dev))
 
     for i in range(len(quant_outs)):
-        np.save("weights_dist/bloom_output_q_ln_mean2_all_float/layer_{}".format(i), np.array(quant_outs[i]))
+        np.save("../Norm_tweaking/norm_tweaking_weights_dist_{}bit_lr1e6/layer_{}".format(bit, i), np.array(quant_outs[i]))
     del quant_outs
     for h in record_handles:
         h.remove()
@@ -610,7 +610,7 @@ if __name__ == '__main__':
 
     if not args.load and not args.load_hf_model and args.wbits < 16 and not args.nearest:
         tick = time.time()
-        quantizers = bloom_sequential(model, dataloader, DEV, update_norm=args.update_norm, lr=args.lr)
+        quantizers = bloom_sequential(model, dataloader, DEV, update_norm=args.update_norm, lr=args.lr, bit=args.wbits)
         print(time.time() - tick)
 
     if args.benchmark:

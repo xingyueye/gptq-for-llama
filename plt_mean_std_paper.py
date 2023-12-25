@@ -1,13 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-# import torch
+import torch
 
 # Bloom Model Output
 
-float_path = "weights_dist/bloom_output/" # Float 
-quant_path = "weights_dist/bloom_output_q/" # GPTQ per-block activation
-ln_quant_path = "weights_dist/bloom_output_q_ln/"  # Norm-Tweaking per-block acitvation
+float_path = "../Norm_tweaking/gptq_weights_dist/bloom_output_q_ln_mean2_all_float/" # Float 
+quant_path = "../Norm_tweaking/gptq_weights_dist/bloom_output_q_ln_mean2_all_gptq/" # GPTQ per-block activation
+ln_quant_path = "../Norm_tweaking/gptq_weights_dist_2bit/" # GPTQ per-block activation
+# ln_quant_path = "../Norm_tweaking/gptq_weights_dist/bloom_output_q_ln/"  # Norm-Tweaking per-block acitvation
 # ln_quant_path = "weights_dist/bloom_output_q_ln_mean2/" #  Norm-Tweaking per-block acitvatio / per-layer learning rate
 
 float_path_all = "weights_dist/bloom_output_q_ln_mean2_all_float/" # Float with Std
@@ -18,6 +19,15 @@ smooth_float_path = "smooth_quant_weights_dist/bloom_output_float/" # Float
 smooth_quant_path = "smooth_quant_weights_dist/bloom_output_smoothquant/" # SmoothQuant per-block activation
 smooth_ln_quant_path = "smooth_quant_weights_dist/bloom_output_smoothquant_nt/"  # Norm-Tweaking per-block acitvation
 
+float_path_all = "../Norm_tweaking/gptq_weights_dist/bloom_output_q_ln_mean2_all_float/" # Float 
+quant_path_2bit = "../Norm_tweaking/gptq_weights_dist_2bit/" # GPTQ per-block activation
+quant_path_4bit = "../Norm_tweaking/gptq_weights_dist/bloom_output_q_ln_mean2_all_gptq/" # GPTQ per-block activation
+quant_path_8bit = "../Norm_tweaking/gptq_weights_dist_8bit/" # GPTQ per-block activation
+
+ln_path_2bit = "../Norm_tweaking/norm_tweaking_weights_dist_2bit/"
+ln_path_4bit = "../Norm_tweaking/norm_tweaking_weights_dist_4bit_lr1e6/"
+# ln_path_4bit = "../Norm_tweaking/gptq_weights_dist_2bit/"
+ln_path_8bit = "../Norm_tweaking/norm_tweaking_weights_dist_8bit/"
 
 def load_data():
     f_means = []
@@ -210,14 +220,14 @@ def load_data_all(float_path_all, quant_path_all, ln_quant_path_all, save_name='
         q_torch = torch.from_numpy(q_data).cuda()
         q_torch_ln = torch.from_numpy(q_data_ln).cuda()
 
-        gptq_diff = f_torch - q_torch
+        gptq_diff = (f_torch - q_torch).abs()
         gptq_diff_mean = torch.mean(gptq_diff)
         gptq_diff_std = torch.std(gptq_diff)
 
         q_means.append(gptq_diff_mean)
         q_stds.append(gptq_diff_std)
 
-        norm_tweak_diff = f_torch - q_torch_ln
+        norm_tweak_diff = (f_torch - q_torch_ln).abs()
         norm_tweak_diff_mean = torch.mean(norm_tweak_diff)
         norm_tweak_diff_std = torch.std(norm_tweak_diff)
         
@@ -235,6 +245,67 @@ def load_data_all(float_path_all, quant_path_all, ln_quant_path_all, save_name='
 
     return diff_means, diff_stds, diff_means_1, diff_stds_1
 
+
+def load_data_3b(float_path_all, quant_path_1, quant_path_2, quant_path_3, save_name='diff_npy/mean_std.npy'):
+
+    q_means_1 = []
+    q_stds_1 = []
+
+    q_means_2 = []
+    q_stds_2 = []
+
+    q_means_3 = []
+    q_stds_3 = []
+
+    # 30 layers
+    for i in tqdm(range(30)):
+        f_data = np.load(float_path_all+"layer_{}.npy".format(i))
+        q_data_1 = np.load(quant_path_1+"layer_{}.npy".format(i))
+        q_data_2 = np.load(quant_path_2+"layer_{}.npy".format(i))
+        q_data_3 = np.load(quant_path_3+"layer_{}.npy".format(i))
+
+        f_torch = torch.from_numpy(f_data).cuda()
+        q_torch_1 = torch.from_numpy(q_data_1).cuda()
+        q_torch_2 = torch.from_numpy(q_data_2).cuda()
+        q_torch_3 = torch.from_numpy(q_data_3).cuda()
+
+
+        gptq_diff_1 = (f_torch - q_torch_1).abs()
+        gptq_diff_mean_1 = torch.mean(gptq_diff_1)
+        gptq_diff_std_1 = torch.std(gptq_diff_1)
+
+        q_means_1.append(gptq_diff_mean_1)
+        q_stds_1.append(gptq_diff_std_1)
+
+        gptq_diff_2 = (f_torch - q_torch_2).abs()
+        gptq_diff_mean_2 = torch.mean(gptq_diff_2)
+        gptq_diff_std_2 = torch.std(gptq_diff_2)
+
+        q_means_2.append(gptq_diff_mean_2)
+        q_stds_2.append(gptq_diff_std_2)
+
+        gptq_diff_3 = (f_torch - q_torch_3).abs()
+        gptq_diff_mean_3 = torch.mean(gptq_diff_3)
+        gptq_diff_std_3 = torch.std(gptq_diff_3)
+
+        q_means_3.append(gptq_diff_mean_3)
+        q_stds_3.append(gptq_diff_std_3)
+
+
+    diff_means_1 = np.array([m.cpu().numpy()for m in q_means_1])
+    diff_stds_1 = np.array([s.cpu().numpy() for s in q_stds_1])
+
+
+    diff_means_2 = np.array([m.cpu().numpy()for m in q_means_2])
+    diff_stds_2 = np.array([s.cpu().numpy() for s in q_stds_2])
+
+
+    diff_means_3 = np.array([m.cpu().numpy()for m in q_means_3])
+    diff_stds_3 = np.array([s.cpu().numpy() for s in q_stds_3])
+    
+    np.save(save_name, [diff_means_1, diff_stds_1, diff_means_2, diff_stds_2, diff_means_3, diff_stds_3])
+
+    return diff_means_1, diff_stds_1, diff_means_2, diff_stds_2, diff_means_3, diff_stds_3
 
 def plot_mean_std_all(diff_means, diff_stds, diff_means_1, diff_stds_1):
 
@@ -355,9 +426,53 @@ def plot_mean_std_all_in_one(diff_means, diff_stds, diff_means_1, diff_stds_1, s
 
     plt.tight_layout()
     if show_std:
-        save_name = "plot_imgs_bo/seq_mean_all_in_one_old_show_std.pdf"
+        save_name = "plot_imgs_test/seq_mean_all_gptq-4bit_ln-4bit_show_std.png"
     else:
-        save_name = "plot_imgs_bo/seq_mean_all_in_one_old.pdf"
+        save_name = "plot_imgs_test/seq_mean_all_in_one_old.pdf"
+
+    plt.savefig(save_name)
+
+
+def plot_3b_mean_std_all_in_one(diff_means_1, diff_stds_1, diff_means_2, diff_stds_2, diff_means_3, diff_stds_3, show_std=True):
+
+    # # 绘制 mean 和 std 曲线
+    fig, axes = plt.subplots(1,1,figsize=(5,3))
+    # plt.rcParams['font.family'] = 'DejaVu Sans'
+
+    # plt.rc('text', usetex=True)
+    # plt.rc('font', family='serif')
+    # plt.rcParams["patch.force_edgecolor"] = True
+    # axes = axes.flatten()
+    axes = [axes]
+
+    axes[0].plot(diff_means_1, label='GPTQ-2bit')
+    if show_std:
+        axes[0].fill_between(
+            range(len(diff_means_1)), diff_means_1-diff_stds_1, diff_means_1+diff_stds_1, alpha=0.2,
+        )
+
+    axes[0].plot(diff_means_2, label='GPTQ-4bit')
+    if show_std:
+        axes[0].fill_between(
+            range(len(diff_means_2)), diff_means_2-diff_stds_2, diff_means_2+diff_stds_2, alpha=0.2,
+        )
+
+    axes[0].plot(diff_means_3, label='GPTQ-8bit')
+    if show_std:
+        axes[0].fill_between(
+            range(len(diff_means_3)), diff_means_3-diff_stds_3, diff_means_3+diff_stds_3, alpha=0.2,
+        )
+
+    axes[0].set_ylabel("$\Delta_\mu$", rotation=0, labelpad=10)
+    axes[0].set_xlabel("Layer")
+
+    axes[0].legend(loc="upper left")
+
+    plt.tight_layout()
+    if show_std:
+        save_name = "plot_imgs_test/seq_mean_all_in_one_3b_std.pdf"
+    else:
+        save_name = "plot_imgs_test/seq_mean_all_in_one_3b.pdf"
 
     plt.savefig(save_name)
 
@@ -424,16 +539,16 @@ def plot_mean_std_all_in_one_pair(diff_means, diff_stds, diff_means_1, diff_stds
 
 def main():
     # bs=128
-    diff_means, diff_stds, diff_means_1, diff_stds_1 = load_data()
+    # diff_means, diff_stds, diff_means_1, diff_stds_1 = load_data()
     # plot_mean_std_all_in_one(diff_means, diff_stds, diff_means_1, diff_stds_1, show_std=True)
 
     # diff_means_smooth, diff_stds_smooth, diff_means_1_smooth, diff_stds_1_smooth = load_data_smooth(smooth_float_path, smooth_quant_path, smooth_ln_quant_path)
 
-    diff_means_smooth, diff_stds_smooth, diff_means_1_smooth, diff_stds_1_smooth = np.load('diff_npy/mean_std_smooth.npy')
+    # diff_means_smooth, diff_stds_smooth, diff_means_1_smooth, diff_stds_1_smooth = np.load('diff_npy/mean_std_smooth.npy')
 
-    plot_mean_std_all_in_one_pair(diff_means, diff_stds, diff_means_1, diff_stds_1,
-                                  diff_means_smooth, diff_stds_smooth, diff_means_1_smooth, diff_stds_1_smooth,
-                                  show_std=False)
+    # plot_mean_std_all_in_one_pair(diff_means, diff_stds, diff_means_1, diff_stds_1,
+    #                               diff_means_smooth, diff_stds_smooth, diff_means_1_smooth, diff_stds_1_smooth,
+    #                               show_std=False)
 
     # load_data_all(smooth_float_path, smooth_quant_path, smooth_ln_quant_path, 'diff_npy/mean_std_smooth.npy')
 
@@ -448,7 +563,20 @@ def main():
     # diff_means, diff_stds, diff_stds, diff_stds_1 = np.load('diff_npy/mean_std.npy')
     # print(diff_means)
     # plot_mean_std_all_in_one(diff_means, diff_stds, diff_stds, diff_stds_1)
-    
+
+    # diff_means, diff_stds, diff_stds, diff_stds_1 = load_data_all(float_path, quant_path, ln_quant_path, 'diff_npy/mean_std_gpt_w2-w4.npy')
+    # diff_means, diff_stds, diff_stds, diff_stds_1 = np.load('diff_npy/mean_std_gpt_w2-w4.npy')
+    # print(diff_means)
+    # plot_mean_std_all_in_one(diff_means, diff_stds, diff_stds, diff_stds_1, show_std=True)
+
+    # diff_means_1, diff_stds_1, diff_means_2, diff_stds_2, diff_means_3, diff_stds_3 = load_data_3b(float_path_all, quant_path_2bit, quant_path_4bit, quant_path_8bit, save_name='diff_npy/mean_std_abs.npy')
+    # diff_means_1, diff_stds_1, diff_means_2, diff_stds_2, diff_means_3, diff_stds_3 =  np.load('diff_npy/mean_std_abs.npy')
+    # plot_3b_mean_std_all_in_one(diff_means_1, diff_stds_1, diff_means_2, diff_stds_2, diff_means_3, diff_stds_3, show_std=True)
+
+    diff_means, diff_stds, diff_stds, diff_stds_1 = load_data_all(float_path_all, quant_path_4bit, ln_path_4bit, 'diff_npy/mean_std_gptq-4bit_ln-4bit.npy')
+    # diff_means, diff_stds, diff_stds, diff_stds_1 = np.load('diff_npy/mean_std_gptq-2bit_ln-2bit.npy')
+    print(diff_means)
+    plot_mean_std_all_in_one(diff_means, diff_stds, diff_stds, diff_stds_1, show_std=True)
 
 if __name__ == "__main__":
     main()
