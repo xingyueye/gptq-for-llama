@@ -1,0 +1,82 @@
+## 表示作业的基本信息，自动填充，请勿修改
+## 普通任务使用指南：https://km.sankuai.com/page/1211712208
+## 溯源任务使用指南：https://km.sankuai.com/page/1447767167
+## 视觉服务生产指南：https://km.sankuai.com/page/1447810687
+[base]
+type = ml-vision
+
+[resource]
+usergroup = hadoop-automl
+#queue = root.zw05_training_cluster.hadoop-vision.elastic_job
+queue = root.zw05_training_cluster.hadoop-vision.job
+
+[dataset]
+## 溯源任务数据集配置，普通任务无需填写
+## 填写数据所在的DolphinFS全路径（支持配置多个，位置需一一对应，','分隔）
+dataset_path =
+
+[job_track]
+## 训练任务关联的需求ID，所有任务均需填写，参考https://km.sankuai.com/page/1314352990配置
+demand_id = 3043
+
+## 溯源任务训练目录配置，普通任务无需填写
+## 溯源任务训练目录，用于存放预训练模型文件、输出模型文件等
+## 除数据目录外，溯源任务需要访问的目录均需填写，否则无访问权限
+## 填写需要访问的DolphinFS全路径（支持配置多个，','分隔）
+train_dir =
+
+[roles]
+workers = 1
+#worker.memory = 402432
+##worker.memory = 50432
+#worker.vcore = 8
+#worker.vcore = 48
+#worker.gcores32g = 1
+#worker.gcores32g = 8
+#80G
+#worker.memory = 481792
+worker.memory = 963584
+#worker.vcore = 96
+worker.vcore = 192
+#worker.gcores40g = 8
+worker.gcores80g = 8
+## worker启动后执行的脚本，一般为训练作业的执行命令
+worker.script = sh /mnt/dolphinfs/ssd_pool/docker/user/hadoop-automl/lee/LLM/hope/hope_eval_llama.sh
+
+## worker端python脚本的输入参数
+## 可以设置args.batch_size = 32，则会向worker.script追加参数--batch_size=32
+[user_args]
+
+[am]
+afo.app.am.resource.mb = 4096
+
+[tensorboard]
+with.tensor.board = false
+
+## docker环境配置
+[docker]
+afo.docker.image.name = registryonline-hulk.sankuai.com/custom_prod/com.sankuai.data.hadoop.gpu/data-hadoop-automl_cvzoo-test-2-a643e78d
+
+## 是否使用预拉取
+[data]
+afo.data.prefetch = false
+
+## 是否支持容错
+[failover]
+afo.app.support.engine.failover=true
+
+## conda环境上传
+# [conda]
+# afo.conda.env.name =
+# afo.conda.env.path =
+
+
+[others]
+## pytorch dataloader可能会用到共享内存，配置需要的共享内存（单位为B）
+afo.app.env.YARN_CONTAINER_RUNTIME_DOCKER_SHM_SIZE_BYTES = 19238400000
+## 作业结束后，会通过大象通知用户
+afo.xm.notice.receivers.account = liliang58
+## 作业排队时间上限，单位秒
+afo.app.yarn.allocate.timeout.seconds = 14400
+## 多机情况下可以配置不同的分布式模式，默认取值为ps，代表tensorflow/ps架构。其他取值有mpi，代表mpi/horovod架构。
+# distribute.mode =
